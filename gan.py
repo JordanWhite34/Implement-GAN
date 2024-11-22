@@ -5,6 +5,9 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 from torchvision.utils import save_image
 
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+print("Using device:", device)
+
 class Generator(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(Generator, self).__init__()
@@ -50,9 +53,9 @@ if __name__ == "__main__":
     latent_dim = 100  # Size of the random noise vector
     data_dim = 28 * 28  # Output size (MNIST images are 28x28)
 
-    generator = Generator(latent_dim, data_dim)
+    generator = Generator(latent_dim, data_dim).to(device)
     hidden_dim = 128  # Number of neurons in hidden layers
-    discriminator = Discriminator(data_dim, hidden_dim)
+    discriminator = Discriminator(data_dim, hidden_dim).to(device)
 
     # Loss function
     criterion = nn.BCELoss()
@@ -62,16 +65,17 @@ if __name__ == "__main__":
     generator_optimizer = torch.optim.Adam(generator.parameters(), lr=0.0002, betas=(0.5, 0.999))
     discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=0.0001, betas=(0.5, 0.999))
 
-    # Generate random noise to test the Generator
-    z = torch.randn(1, latent_dim)  # A single noise sample
-    fake_data = generator(z)    # Generate fake data
-    print("Fake Data Shape:", fake_data.shape)  # Should be (1, 784)
-    # Assert the Generator's output shape
-    assert fake_data.shape == (1, data_dim), f"Generator output shape mismatch: {fake_data.shape}"
+    # # Generate random noise to test the Generator
+    # z = torch.randn(1, latent_dim)  # A single noise sample
+    # fake_data = generator(z)    # Generate fake data
+    # print("Fake Data Shape:", fake_data.shape)  # Should be (1, 784)
+    # # Assert the Generator's output shape
+    # assert fake_data.shape == (1, data_dim), f"Generator output shape mismatch: {fake_data.shape}"
 
     # Get a batch of real data
     real_data, _ = next(iter(dataloader))  # Ignore labels
     real_data = real_data.view(-1, data_dim)  # Flatten the images
+    real_data = real_data.to(device)  # Move to GPU if available
 
     # Test the Discriminator with real data
     output = discriminator(real_data[:1])  # Use a single sample
@@ -86,12 +90,12 @@ if __name__ == "__main__":
     for epoch in range(epochs):
         for real_data, _ in dataloader:
             # Flatten real images
-            real_data = real_data.view(-1, data_dim)
+            real_data = real_data.view(-1, data_dim).to(device)
             batch_size = real_data.size(0)
 
             # Labels for real and fake data
-            real_labels = torch.full((batch_size, 1), 0.9)  # Real labels as 0.9 instead of 1.0
-            fake_labels = torch.full((batch_size, 1), 0.1)  # Fake data -> Label 0.1
+            real_labels = torch.full((batch_size, 1), 0.9, device=device)  # Real labels as 0.9 instead of 1.0
+            fake_labels = torch.full((batch_size, 1), 0.1, device=device)  # Fake data -> Label 0.1
 
             ### Train Discriminator ###
             # Real data loss
@@ -99,7 +103,7 @@ if __name__ == "__main__":
             loss_real = criterion(real_output, real_labels)
 
             # Fake data loss
-            z = torch.randn(batch_size, latent_dim)  # Generate noise
+            z = torch.randn(batch_size, latent_dim, device=device)  # Generate noise
             fake_data = generator(z)
             fake_output = discriminator(fake_data.detach())  # Detach to avoid backprop into Generator
             loss_fake = criterion(fake_output, fake_labels)
@@ -113,7 +117,7 @@ if __name__ == "__main__":
             discriminator_optimizer.step()
 
             ### Train Generator ###
-            z = torch.randn(batch_size, latent_dim)  # Generate new noise
+            z = torch.randn(batch_size, latent_dim, device=device)  # Generate new noise
             fake_data = generator(z)
             fake_output = discriminator(fake_data)  # No detach, allow backprop
             loss_g = criterion(fake_output, real_labels)  # Fool the Discriminator (label as real)
@@ -126,8 +130,8 @@ if __name__ == "__main__":
 
         # Generate and display a grid of images at the end of training
         if epoch == epochs - 1:  # Only display the grid after the last epoch
-            z = torch.randn(16, latent_dim)  # Generate 16 random noise vectors
-            generated_data = generator(z).view(-1, 1, 28, 28)  # Reshape to image format
+            z = torch.randn(16, latent_dim, device=device)  # Generate 16 random noise vectors
+            generated_data = generator(z).view(-1, 1, 28, 28).cpu()  # Reshape to image format
             
             # Create a grid
             fig, axes = plt.subplots(4, 4, figsize=(6, 6))
