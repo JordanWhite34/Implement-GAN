@@ -1,0 +1,24 @@
+# Ignore virtual environments
+GAN-base/
+
+# Ignore compiled Python files
+*.pyc
+__pycache__/
+
+# Ignore system files
+.DS_Store
+
+# Ignore logs and temp files
+*.log
+*.tmp
+
+# Ignore large library files
+*.dylib
+*.so
+*.dll
+
+# Ignore Data Files
+data/
+
+# Ignore Output Files
+output/
