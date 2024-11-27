@@ -107,3 +107,8 @@ transform = transforms.Compose([
 # Load the dataset
 mountain_data = datasets.ImageFolder(root=destination_path, transform=transform)
 dataloader = DataLoader(mountain_data, batch_size=64, shuffle=True)
+
+# Get the resolution of one sample image
+sample_image, _ = mountain_data[0]
+image_resolution = sample_image.shape[1:]
+print(image_resolution)
