@@ -20,6 +20,7 @@ target_folder = "x128/Mountain/"  # Replace with the folder you want from the da
 download_path = "data"
 dataset_path = os.path.join(download_path, dataset_name.split('/')[-1])
 destination_path = "./data/mountains"  # Where you want to move the folder
+output_dir = "./generated_images/"
 
 if os.path.exists(destination_path):
     print(f"Folder '{target_folder}' already exists in '{destination_path}'. Skipping download and move.")
@@ -47,6 +48,7 @@ else:
 
     # Ensure the destination directory exists
     os.makedirs(destination_path, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # Check if the target folder exists in the dataset
     if os.path.exists(source_path):
@@ -119,3 +121,86 @@ dataloader = DataLoader(mountain_data, batch_size=64, shuffle=True)
 sample_image, _ = mountain_data[0]
 image_resolution = sample_image.shape[1:]
 print(image_resolution)
+
+# Main loop
+if __name__ == "__main__":
+    # Define training parameters
+    epochs = 50
+    batch_size = 64
+    latent_dim = 100  # Size of the random noise vector
+    img_size = 128
+    img_channels = 3  # RGB images
+
+    # Labels for real / fake data
+    real_label = 0.9
+    fake_label = 0.1
+
+    # Initialize models
+    generator = Generator(latent_dim, img_size * img_size * img_channels).to(device)
+    hidden_dim = 128  # Number of neurons in hidden layers
+    discriminator = Discriminator(img_size * img_size * img_channels, hidden_dim).to(device)
+
+    # Optimizers and loss function
+    criterion = nn.BCELoss()
+    generator_optimizer = torch.optim.Adam(generator.parameters(), lr=0.0002, betas=(0.5, 0.999))
+    discriminator_optimizer = torch.optim.Adam(discriminator.parameters(), lr=0.0002, betas=(0.5, 0.999))
+
+    # Training loop
+    for epoch in range(epochs):
+        for i, (real_images, _) in enumerate(dataloader):
+            # Move real images to the device
+            real_images = real_images.to(device)
+
+            ## Train Discriminator
+            # Real Images
+            batch_size = real_images.size(0)
+            real_labels = torch.full((batch_size, 1), real_label, device=device)
+            fake_labels = torch.full((batch_size, 1), fake_label, device=device)
+
+            # Forward pass for real images
+            real_output = discriminator(real_images)
+            loss_real = criterion(real_output, real_labels)
+
+            # Fake images
+            noise = torch.randn(batch_size, latent_dim, 1, 1, device=device)    # Generate random noise
+            fake_images = generator(noise)
+            fake_output = discriminator(fake_images.detach())   # Detach to avoid training the Generator
+            loss_fake = criterion(fake_output, fake_labels)
+
+            # Combine losses and backpropogate
+            loss_discriminator = loss_real + loss_fake
+            discriminator_optimizer.zero_grad()
+            loss_discriminator.backward()
+            discriminator_optimizer.step()
+
+            ## Train Generator
+            # Generate new fake images
+            noise = torch.randn(batch_size, latent_dim, 1, 1, device=device)
+            fake_images = generator(noise)
+
+            # Get discriminator's predictions
+            output = discriminator(fake_images)
+            loss_generator = criterion(output, real_labels) # Generator wants to fool the discriminator
+            
+            # Backpropogate and optimize
+            generator_optimizer.zero_grad()
+            loss_generator.backward()
+            generator_optimizer.step()
+
+            # Print progress
+            if i % 50 == 0:
+                print(f"Epoch [{epoch+1}/{epochs}], Step [{i}/{len(dataloader)}], "
+                      f"Loss D: {loss_discriminator.item():.4f}, Loss G: {loss_generator.item():.4f}")
+                
+        # Save images at the end of each epoch
+        z = torch.randn(16, latent_dim, device=device)  # Generate 16 random noise vectors
+        generated_images = generator(z).view(-1, img_channels, img_size, img_size)  # Reshape to image format
+        generated_images = generated_images * 0.5 + 0.5  # Denormalize to [0, 1]
+
+        # Save to file
+        save_image(generated_images, f"{output_dir}/epoch_{epoch+1}.png", nrow=4, normalize=True)
+
+        print(f"Generated images saved for epoch {epoch+1} at '{output_dir}/epoch_{epoch+1}.png'.")
+    
+    # Save final results
+    print("Training complete. Check generated images in the 'generated_images' folder.")
