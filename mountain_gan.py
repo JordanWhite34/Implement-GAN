@@ -68,22 +68,45 @@ print("Using device:", device)
 
 
 # Define Generator and Discriminator classes
+import torch
+import torch.nn as nn
+
 class Generator(nn.Module):
-    def __init__(self, input_dim, output_dim):
+    def __init__(self, input_dim, img_channels=3, feature_maps=64):
         super(Generator, self).__init__()
         self.model = nn.Sequential(
-            nn.ConvTranspose2d(input_dim, 512, kernel_size=4, stride=1, padding=0),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2),
-            nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2),
-            nn.ConvTranspose2d(256, output_dim, kernel_size=4, stride=2, padding=1),
-            nn.Tanh()   # Output in the range [-1, 1]
+            # Input: N x input_dim x 1 x 1
+            nn.ConvTranspose2d(input_dim, feature_maps * 16, kernel_size=4, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(feature_maps * 16),
+            nn.ReLU(True),
+            # State: (feature_maps*16) x 4 x 4
+
+            nn.ConvTranspose2d(feature_maps * 16, feature_maps * 8, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(feature_maps * 8),
+            nn.ReLU(True),
+            # State: (feature_maps*8) x 8 x 8
+
+            nn.ConvTranspose2d(feature_maps * 8, feature_maps * 4, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(feature_maps * 4),
+            nn.ReLU(True),
+            # State: (feature_maps*4) x 16 x 16
+
+            nn.ConvTranspose2d(feature_maps * 4, feature_maps * 2, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(feature_maps * 2),
+            nn.ReLU(True),
+            # State: (feature_maps*2) x 32 x 32
+
+            nn.ConvTranspose2d(feature_maps * 2, feature_maps, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(feature_maps),
+            nn.ReLU(True),
+            # State: (feature_maps) x 64 x 64
+
+            nn.ConvTranspose2d(feature_maps, img_channels, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.Tanh()
+            # Output: img_channels x 128 x 128
         )
 
     def forward(self, z):
-        z = z.view(z.size(0), -1, 1, 1)  # Reshape noise to (N, input_dim, 1, 1)
         return self.model(z)
 
 
@@ -91,7 +114,7 @@ class Discriminator(nn.Module):
     def __init__(self, input_channels):
         super(Discriminator, self).__init__()
         self.model = nn.Sequential(
-            nn.Conv2d(input_channels, 128, kernel_size=4, stride=2, padding=1),  # Accept 3 channels
+            nn.Conv2d(input_channels, 128, kernel_size=4, stride=2, padding=1),
             nn.LeakyReLU(0.2),
             nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
@@ -99,18 +122,22 @@ class Discriminator(nn.Module):
             nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2),
-            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=0),  # Single output probability
+            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=0),
             nn.Sigmoid()
         )
+        self.pool = nn.AdaptiveAvgPool2d(1)  # Add a global average pooling layer
 
     def forward(self, x):
-        return self.model(x).view(-1, 1)  # Flatten the output
+        x = self.model(x)          # Output shape: [batch_size, 1, 13, 13]
+        x = self.pool(x)           # Output shape: [batch_size, 1, 1, 1]
+        x = x.view(x.size(0), -1)  # Reshape to [batch_size, 1]
+        return x
     
 
 # Normalize Data
 transform = transforms.Compose([
     transforms.ToTensor(),
-    transforms.Normalize([0.5], [0.5])  # Normalize to [-1, 1]
+    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # For RGB
 ])
 
 # Load the dataset
@@ -136,9 +163,9 @@ if __name__ == "__main__":
     fake_label = 0.1
 
     # Initialize models
-    generator = Generator(latent_dim, img_size * img_size * img_channels).to(device)
+    generator = Generator(latent_dim, img_channels=img_channels).to(device)
+    discriminator = Discriminator(img_channels).to(device)
     hidden_dim = 128  # Number of neurons in hidden layers
-    discriminator = Discriminator(img_size * img_size * img_channels, hidden_dim).to(device)
 
     # Optimizers and loss function
     criterion = nn.BCELoss()
@@ -167,7 +194,7 @@ if __name__ == "__main__":
             fake_output = discriminator(fake_images.detach())   # Detach to avoid training the Generator
             loss_fake = criterion(fake_output, fake_labels)
 
-            # Combine losses and backpropogate
+            # Combine losses and backpropagate
             loss_discriminator = loss_real + loss_fake
             discriminator_optimizer.zero_grad()
             loss_discriminator.backward()
@@ -181,8 +208,8 @@ if __name__ == "__main__":
             # Get discriminator's predictions
             output = discriminator(fake_images)
             loss_generator = criterion(output, real_labels) # Generator wants to fool the discriminator
-            
-            # Backpropogate and optimize
+
+            # Backpropagate and optimize
             generator_optimizer.zero_grad()
             loss_generator.backward()
             generator_optimizer.step()
@@ -190,15 +217,16 @@ if __name__ == "__main__":
             # Print progress
             if i % 50 == 0:
                 print(f"Epoch [{epoch+1}/{epochs}], Step [{i}/{len(dataloader)}], "
-                      f"Loss D: {loss_discriminator.item():.4f}, Loss G: {loss_generator.item():.4f}")
-                
-        # Save images at the end of each epoch
-        z = torch.randn(16, latent_dim, device=device)  # Generate 16 random noise vectors
-        generated_images = generator(z).view(-1, img_channels, img_size, img_size)  # Reshape to image format
-        generated_images = generated_images * 0.5 + 0.5  # Denormalize to [0, 1]
+                    f"Loss D: {loss_discriminator.item():.4f}, Loss G: {loss_generator.item():.4f}")
 
-        # Save to file
-        save_image(generated_images, f"{output_dir}/epoch_{epoch+1}.png", nrow=4, normalize=True)
+        # Save images at the end of each epoch
+        with torch.no_grad():
+            z = torch.randn(16, latent_dim, 1, 1, device=device)  # Generate 16 random noise vectors
+            generated_images = generator(z)  # Output shape: [16, 3, 128, 128]
+            generated_images = generated_images * 0.5 + 0.5  # Denormalize to [0, 1]
+
+            # Save to file
+            save_image(generated_images, f"{output_dir}/epoch_{epoch+1}.png", nrow=4, normalize=True)
 
         print(f"Generated images saved for epoch {epoch+1} at '{output_dir}/epoch_{epoch+1}.png'.")
     
