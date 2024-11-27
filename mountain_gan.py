@@ -70,15 +70,18 @@ class Generator(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(Generator, self).__init__()
         self.model = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 512),
-            nn.ReLU(),
-            nn.Linear(512, output_dim),
-            nn.Tanh()
+            nn.ConvTranspose2d(input_dim, 512, kernel_size=4, stride=1, padding=0),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2),
+            nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2),
+            nn.ConvTranspose2d(256, output_dim, kernel_size=4, stride=2, padding=1),
+            nn.Tanh()   # Output in the range [-1, 1]
         )
 
     def forward(self, z):
+        z = z.view(z.size(0), -1, 1, 1)  # Reshape noise to (N, input_dim, 1, 1)
         return self.model(z)
 
 
@@ -86,16 +89,20 @@ class Discriminator(nn.Module):
     def __init__(self, input_dim, hidden_dim):
         super(Discriminator, self).__init__()
         self.model = nn.Sequential(
-            nn.Linear(input_dim, 512),
+            nn.Conv2d(input_dim, 128, kernel_size=4, stride=2, padding=1),
             nn.LeakyReLU(0.2),
-            nn.Linear(512, 256),
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2),
-            nn.Linear(256, 1),
-            nn.Sigmoid()
+            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(512, 1, 4, 1, 0),  # (N, 1, 1, 1, 1)
+            nn.Sigmoid()    # Output probability (0-1)
         )
 
     def forward(self, x):
-        return self.model(x)
+        return self.model(x).view(-1, 1)
     
 
 # Normalize Data
